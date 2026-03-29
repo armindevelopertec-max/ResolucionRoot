@@ -6,8 +6,13 @@
 
 BluetoothSerial SerialBT;
 
+#define IN1 22
+#define IN2 19
+#define IN3 18
+#define IN4 21
+
 ///////////////////// PARAMETROS //////////////////////
-const int R = 5880;   // Resolución real
+const int R = 5880;  // Resolución real
 
 double posL = 0.0, posR = 0.0;
 double rpmL = 0.0, rpmR = 0.0;
@@ -36,8 +41,7 @@ unsigned long sampleTime = 100;
 
 ///////////////////// INTERRUPCIONES //////////////////////
 
-void IRAM_ATTR encoderL()
-{
+void IRAM_ATTR encoderL() {
   antL = actL;
 
   if (digitalRead(C2L)) bitSet(actL, 0);
@@ -57,8 +61,7 @@ void IRAM_ATTR encoderL()
   if (antL == 2 && actL == 3) nL--;
 }
 
-void IRAM_ATTR encoderR()
-{
+void IRAM_ATTR encoderR() {
   antR = actR;
 
   if (digitalRead(C2R)) bitSet(actR, 0);
@@ -117,8 +120,43 @@ void resetEncoders() {
   interrupts();
 }
 
-void setup()
-{
+void alto() {  //0000
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, LOW);
+}
+
+void adelante() {  //1010
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+}
+
+void atras() {  //0101
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, HIGH);
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, HIGH);
+}
+
+void giroIzq() {  //0110
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, HIGH);
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+}
+
+void giroDer() {  //1001
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, HIGH);
+}
+
+
+void setup() {
   SerialBT.begin("MrRootBot");
 
   pinMode(C1L, INPUT_PULLUP);
@@ -126,6 +164,11 @@ void setup()
 
   pinMode(C1R, INPUT_PULLUP);
   pinMode(C2R, INPUT_PULLUP);
+
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
 
   attachInterrupt(C1L, encoderL, CHANGE);
   attachInterrupt(C2L, encoderL, CHANGE);
@@ -137,10 +180,8 @@ void setup()
 }
 
 ///////////////////// LOOP //////////////////////
-void loop()
-{
-  if (millis() - lastTime >= sampleTime)
-  {
+void loop() {
+  if (millis() - lastTime >= sampleTime) {
     lastTime = millis();
 
     calcularPosicion();
@@ -172,6 +213,16 @@ void recibirComandos() {
     if (cmd == "reset") {
       resetEncoders();
       SerialBT.println("Encoders reseteados");
+    } else if (cmd == "ADELANTE") {
+      adelante();
+    } else if (cmd == "ATRAS") {
+      atras();
+    } else if (cmd == "STOP") {
+      alto();
+    } else if (cmd == "IZQ") {
+      giroIzq();
+    } else if (cmd == "DER") {
+      giroDer();
     }
   }
 }
