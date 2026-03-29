@@ -18,11 +18,22 @@ const int RR = 5880;  // derecha
 
 double posL = 0.0, posR = 0.0;
 
+//  velocidad angular (rad/s)
+double wL = 0.0, wR = 0.0;
+
+//  constantes ajustadas a sampleTime
+const double constL = (1000.0 / sampleTime ) * (2 * PI) / RL;
+const double constR = (1000.0 / sampleTime ) * (2 * PI) / RR;
+
 volatile long nL = 0;
 volatile long nR = 0;
 
 volatile int antL = 0, actL = 0;
 volatile int antR = 0, actR = 0;
+
+// para calcular diferencia de pulsos
+long last_nL = 0;
+long last_nR = 0;
 
 ///////////////////// PINES //////////////////////
 // IZQUIERDO
@@ -93,6 +104,25 @@ void calcularPosicion() {
   posR = (cR * 360.0) / RR;
 }
 
+//  NUEVA: velocidad angular
+void calcularVelAngular() {
+  long aL, aR;
+
+  noInterrupts();
+  aL = nL;
+  aR = nR;
+  interrupts();
+
+  long dL = aL - last_nL;
+  long dR = aR - last_nR;
+
+  last_nL = aL;
+  last_nR = aR;
+
+  wL = dL * constL;
+  wR = dR * constR;
+}
+
 void resetEncoders() {
   noInterrupts();
   nL = 0;
@@ -159,7 +189,7 @@ void setup() {
   attachInterrupt(C1R, encoderR, CHANGE);
   attachInterrupt(C2R, encoderR, CHANGE);
 
-  SerialBT.println("Sistema 2R listo (solo posicion)");
+  SerialBT.println("Sistema");
 }
 
 ///////////////////// LOOP //////////////////////
@@ -169,6 +199,7 @@ void loop() {
     lastTime = millis();
 
     calcularPosicion();
+    calcularVelAngular();
 
     SerialBT.print("L: ");
     SerialBT.print(posL);
@@ -176,7 +207,14 @@ void loop() {
 
     SerialBT.print("R: ");
     SerialBT.print(posR);
-    SerialBT.println(" deg");
+    SerialBT.print(" deg | ");
+
+    SerialBT.print("wL: ");
+    SerialBT.print(wL);
+    SerialBT.print(" rad/s | ");
+
+    SerialBT.print("wR: ");
+    SerialBT.println(wR);
   }
 
   recibirComandos();
