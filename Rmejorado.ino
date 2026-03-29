@@ -12,19 +12,17 @@ BluetoothSerial SerialBT;
 #define IN4 21
 
 ///////////////////// PARAMETROS //////////////////////
-const int R = 5880;  // Resolución real
+// Resolución independiente
+const int RL = 5880;  // izquierda
+const int RR = 5880;  // derecha
 
 double posL = 0.0, posR = 0.0;
-double rpmL = 0.0, rpmR = 0.0;
 
 volatile long nL = 0;
 volatile long nR = 0;
 
 volatile int antL = 0, actL = 0;
 volatile int antR = 0, actR = 0;
-
-long last_nL = 0;
-long last_nR = 0;
 
 ///////////////////// PINES //////////////////////
 // IZQUIERDO
@@ -37,7 +35,7 @@ const int C2R = 33;
 
 ///////////////////// TIEMPO //////////////////////
 unsigned long lastTime = 0;
-unsigned long sampleTime = 100;
+unsigned long sampleTime = 100; // ms
 
 ///////////////////// INTERRUPCIONES //////////////////////
 
@@ -91,26 +89,8 @@ void calcularPosicion() {
   cR = nR;
   interrupts();
 
-  posL = (cL * 360.0) / R;
-  posR = (cR * 360.0) / R;
-}
-
-void calcularVelocidad() {
-  long aL, aR;
-
-  noInterrupts();
-  aL = nL;
-  aR = nR;
-  interrupts();
-
-  long dL = aL - last_nL;
-  long dR = aR - last_nR;
-
-  last_nL = aL;
-  last_nR = aR;
-
-  rpmL = (dL * 60.0) / R;
-  rpmR = (dR * 60.0) / R;
+  posL = (cL * 360.0) / RL;
+  posR = (cR * 360.0) / RR;
 }
 
 void resetEncoders() {
@@ -120,41 +100,44 @@ void resetEncoders() {
   interrupts();
 }
 
-void alto() {  //0000
+///////////////////// MOVIMIENTO //////////////////////
+
+void alto() {
   digitalWrite(IN1, LOW);
   digitalWrite(IN2, LOW);
   digitalWrite(IN3, LOW);
   digitalWrite(IN4, LOW);
 }
 
-void adelante() {  //1010
+void adelante() {
   digitalWrite(IN1, HIGH);
   digitalWrite(IN2, LOW);
   digitalWrite(IN3, HIGH);
   digitalWrite(IN4, LOW);
 }
 
-void atras() {  //0101
+void atras() {
   digitalWrite(IN1, LOW);
   digitalWrite(IN2, HIGH);
   digitalWrite(IN3, LOW);
   digitalWrite(IN4, HIGH);
 }
 
-void giroIzq() {  //0110
+void giroIzq() {
   digitalWrite(IN1, LOW);
   digitalWrite(IN2, HIGH);
   digitalWrite(IN3, HIGH);
   digitalWrite(IN4, LOW);
 }
 
-void giroDer() {  //1001
+void giroDer() {
   digitalWrite(IN1, HIGH);
   digitalWrite(IN2, LOW);
   digitalWrite(IN3, LOW);
   digitalWrite(IN4, HIGH);
 }
 
+///////////////////// SETUP //////////////////////
 
 void setup() {
   SerialBT.begin("MrRootBot");
@@ -176,16 +159,16 @@ void setup() {
   attachInterrupt(C1R, encoderR, CHANGE);
   attachInterrupt(C2R, encoderR, CHANGE);
 
-  SerialBT.println("Sistema 2 motores listo");
+  SerialBT.println("Sistema 2R listo (solo posicion)");
 }
 
 ///////////////////// LOOP //////////////////////
+
 void loop() {
   if (millis() - lastTime >= sampleTime) {
     lastTime = millis();
 
     calcularPosicion();
-    calcularVelocidad();
 
     SerialBT.print("L: ");
     SerialBT.print(posL);
@@ -193,18 +176,14 @@ void loop() {
 
     SerialBT.print("R: ");
     SerialBT.print(posR);
-    SerialBT.print(" deg | ");
-
-    SerialBT.print("RPM L: ");
-    SerialBT.print(rpmL);
-    SerialBT.print(" | RPM R: ");
-    SerialBT.println(rpmR);
+    SerialBT.println(" deg");
   }
 
   recibirComandos();
 }
 
 ///////////////////// COMANDOS //////////////////////
+
 void recibirComandos() {
   if (SerialBT.available()) {
     String cmd = SerialBT.readStringUntil('\n');
