@@ -1,0 +1,92 @@
+include "BluetoothSerial.h"
+#if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
+#error Bluetooth is not enabled! Please run make menuconfig to and enable it
+#endif
+BluetoothSerial SerialBT;
+///////////////////// COMUNICACION SERIAL ////////////////
+double posicion =0.0;
+const int R=1980;
+String inputString = "";
+bool stringComplete = false;
+const char separator = ',';
+const int dataLength = 2;
+int datos[dataLength];
+
+//////////////////////MOTOR DERECHO/////////////////////////////// 
+const int    C1L = 23;    // Entrada de la señal A del encoder C1(cable amarillo)
+const int    C2L = 22;    // Entrada de la señal B del encoder C2(cable verde)
+
+// Encoder
+volatile int nL = 0;
+volatile int antL      = 0;
+volatile int actL      = 0;
+/////////////////////// TIEMPO DE MUESTREO /////////////////////
+unsigned long lastTime = 0, sampleTime = 100;
+//////// VARIABLES PARA CALCULAR VELOCIDADES ANGULARES /////////
+double constValue = 4.1975; // (1000*2*pi)/R ---> R = 1496.88 - 350RPM Resolucion encoder cuadruple
+
+// Configuracion de las salidas pwm
+const int freq = 10000;
+const int resolution = 8;
+
+/////////////////////// INTERRUPCIONES //////////////////////
+void IRAM_ATTR encoderL()
+{
+  antL=actL;
+               
+  if(digitalRead(C2L)) bitSet(actL,0); else bitClear(actL,0);
+  if(digitalRead(C1L)) bitSet(actL,1); else bitClear(actL,1);
+  
+  
+  if(antL == 2 && actL ==0) nL++;
+  if(antL == 0 && actL ==1) nL++;
+  if(antL == 3 && actL ==2) nL++;
+  if(antL == 1 && actL ==3) nL++;
+  
+  if(antL == 1 && actL ==0) nL--;
+  if(antL == 3 && actL ==1) nL--;
+  if(antL == 0 && actL ==2) nL--;
+  if(antL == 2 && actL ==3) nL--;    
+
+}
+
+
+void setup()
+{
+  SerialBT.begin("nukkuapa");  // Inicializa Bluetooth con el nombre del dispositivo
+  SerialBT.println("Esperando comandos..."); 
+
+  // Configuracion de los pines
+  pinMode(C1L, INPUT);
+  pinMode(C2L, INPUT);
+
+  attachInterrupt(C1L, encoderL, CHANGE);
+  attachInterrupt(C2L, encoderL, CHANGE);  
+}
+void pos_actual(){
+  posicion=(nL*360.0)/R;
+  }
+
+void loop() 
+{
+  if(SerialBT.available()) serialEvent();
+  if(millis()-lastTime >= sampleTime)
+  {
+    lastTime = millis();
+    pos_actual();
+    SerialBT.println("Posicion Actual.: ");
+    SerialBT.println(posicion);
+  }
+  
+}
+
+/////////////// RECEPCION DE DATOS /////////////////////
+void serialEvent() {
+  while (SerialBT.available()) {
+    char inChar = (char)SerialBT.read();
+    inputString += inChar;
+    if (inChar == '\n') {
+      stringComplete = true;
+    }
+  }
+}

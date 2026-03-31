@@ -11,44 +11,40 @@ BluetoothSerial SerialBT;
 #define IN3 18
 #define IN4 21
 
-///////////////////// PARAMETROS //////////////////////
-// Resolución independiente
-const int RL = 5880;  // izquierda
-const int RR = 5880;  // derecha
+volatile double N      = 0.0;
+
+// Rteorico = 5600
+
+const int RL = 5600; //Rreal 5880 
+const int RR = 5600; //Rreal 5850
 
 double posL = 0.0, posR = 0.0;
-
-//  velocidad angular (rad/s)
 double wL = 0.0, wR = 0.0;
 
-//  constantes ajustadas a sampleTime
+unsigned long lastTime = 0;
+unsigned long sampleTime = 100; // ms
+
 const double constL = (1000.0 / sampleTime ) * (2 * PI) / RL;
 const double constR = (1000.0 / sampleTime ) * (2 * PI) / RR;
 
 volatile long nL = 0;
 volatile long nR = 0;
 
+volatile long prev_pulses_rpm = 0;
+unsigned long lastRpmMillis = 0;
+
 volatile int antL = 0, actL = 0;
 volatile int antR = 0, actR = 0;
 
-// para calcular diferencia de pulsos
 long last_nL = 0;
 long last_nR = 0;
 
-///////////////////// PINES //////////////////////
-// IZQUIERDO
 const int C1L = 35;
 const int C2L = 34;
-
-// DERECHO
 const int C1R = 32;
 const int C2R = 33;
 
-///////////////////// TIEMPO //////////////////////
-unsigned long lastTime = 0;
-unsigned long sampleTime = 100; // ms
-
-///////////////////// INTERRUPCIONES //////////////////////
+double radio = 4.5; // cm
 
 void IRAM_ATTR encoderL() {
   antL = actL;
@@ -90,7 +86,6 @@ void IRAM_ATTR encoderR() {
   if (antR == 2 && actR == 3) nR--;
 }
 
-///////////////////// FUNCIONES //////////////////////
 
 void calcularPosicion() {
   long cL, cR;
@@ -104,7 +99,6 @@ void calcularPosicion() {
   posR = (cR * 360.0) / RR;
 }
 
-//  NUEVA: velocidad angular
 void calcularVelAngular() {
   long aL, aR;
 
@@ -128,9 +122,10 @@ void resetEncoders() {
   nL = 0;
   nR = 0;
   interrupts();
+  prev_pulses_rpm = 0;
+  lastRpmMillis = millis();
+  N = 0.0;
 }
-
-///////////////////// MOVIMIENTO //////////////////////
 
 void alto() {
   digitalWrite(IN1, LOW);
@@ -166,9 +161,29 @@ void giroDer() {
   digitalWrite(IN3, LOW);
   digitalWrite(IN4, HIGH);
 }
+void V_Rpm(void)
+{
+  unsigned long now = millis();
 
-///////////////////// SETUP //////////////////////
+  long pulses;
 
+  noInterrupts();
+  pulses = nL;
+  interrupts();
+
+  unsigned long dt = now - lastRpmMillis;
+  if (dt == 0) {
+    prev_pulses_rpm = pulses;
+    lastRpmMillis = now;
+    return;
+  }
+
+  long delta = pulses - prev_pulses_rpm;
+  N = (delta * 60000.0) / (dt * RL);
+
+  prev_pulses_rpm = pulses;
+  lastRpmMillis = now;
+} 
 void setup() {
   SerialBT.begin("MrRootBot");
 
@@ -190,16 +205,35 @@ void setup() {
   attachInterrupt(C2R, encoderR, CHANGE);
 
   SerialBT.println("Sistema");
+  lastRpmMillis = millis();
+  prev_pulses_rpm = 0;
 }
 
-///////////////////// LOOP //////////////////////
-
 void loop() {
+//double distL = (nL / (double)RL) * (2 * PI * radio);
+//double distR = (nR / (double)RR) * (2 * PI * radio);
+
   if (millis() - lastTime >= sampleTime) {
     lastTime = millis();
 
+    V_Rpm();
+    SerialBT.print("Velocidad en RPM Motor izquierda :");
+    SerialBT.println(N);
+//    long cL, cR;
+
+//    noInterrupts();
+//    cL = nL;
+//    cR = nR;
+//    interrupts();
+
+//    SerialBT.print("nL: ");
+//    SerialBT.print(cL);
+//    SerialBT.print(" | ");
+  
+//    SerialBT.print("nR: ");
+//    SerialBT.println(cR);
     calcularPosicion();
-    calcularVelAngular();
+//    calcularVelAngular();
 
     SerialBT.print("L: ");
     SerialBT.print(posL);
@@ -207,20 +241,24 @@ void loop() {
 
     SerialBT.print("R: ");
     SerialBT.print(posR);
-    SerialBT.print(" deg | ");
+    SerialBT.println(" deg | ");
 
-    SerialBT.print("wL: ");
-    SerialBT.print(wL);
-    SerialBT.print(" rad/s | ");
+//    SerialBT.print("wL: ");
+//    SerialBT.print(wL);
+//    SerialBT.print(" rad/s | ");
 
-    SerialBT.print("wR: ");
-    SerialBT.println(wR);
+//    SerialBT.print("wR: ");
+//    SerialBT.println(wR);
+
+//    SerialBT.print("distL: ");
+//    SerialBT.print(distL);
+//    SerialBT.print(" cm | ");
+
+//    SerialBT.print("distR: ");
+//    SerialBT.println(distR);
   }
-
   recibirComandos();
 }
-
-///////////////////// COMANDOS //////////////////////
 
 void recibirComandos() {
   if (SerialBT.available()) {
