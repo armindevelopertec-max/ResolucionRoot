@@ -1,4 +1,6 @@
 #include "BluetoothSerial.h"
+#include <math.h>
+#include <stdlib.h>
 
 #if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
 #error Bluetooth is not enabled!
@@ -6,45 +8,78 @@
 
 BluetoothSerial SerialBT;
 
+// ===================== MOTORES =====================
 #define IN1 22
 #define IN2 19
 #define IN3 18
 #define IN4 21
 
-volatile double N      = 0.0;
-
-// Rteorico = 5600
-
-const int RL = 5600; //Rreal 5880 
-const int RR = 5600; //Rreal 5850
-
-double posL = 0.0, posR = 0.0;
-double wL = 0.0, wR = 0.0;
-
-unsigned long lastTime = 0;
-unsigned long sampleTime = 100; // ms
-
-const double constL = (1000.0 / sampleTime ) * (2 * PI) / RL;
-const double constR = (1000.0 / sampleTime ) * (2 * PI) / RR;
-
-volatile long nL = 0;
-volatile long nR = 0;
-
-volatile long prev_pulses_rpm = 0;
-unsigned long lastRpmMillis = 0;
-
-volatile int antL = 0, actL = 0;
-volatile int antR = 0, actR = 0;
-
-long last_nL = 0;
-long last_nR = 0;
-
+// ===================== ENCODERS =====================
 const int C1L = 35;
 const int C2L = 34;
 const int C1R = 32;
 const int C2R = 33;
 
-double radio = 4.5; // cm
+// ===================== VARIABLES =====================
+volatile long nL = 0;
+volatile long nR = 0;
+
+volatile int antL = 0, actL = 0;
+volatile int antR = 0, actR = 0;
+
+// RPM
+volatile double velocidadL = 0.0;
+volatile double velocidadR = 0.0;
+
+// Velocidad lineal
+double velocidadLinealL = 0.0;
+double velocidadLinealR = 0.0;
+
+// Constantes encoder
+const int R = 5600;
+
+// Posición
+double posL = 0.0, posR = 0.0;
+
+// Tiempo
+unsigned long lastTime = 0;
+unsigned long sampleTime = 100; // ms
+
+// Aux RPM
+volatile long prev_pulses_rpmL = 0;
+volatile long prev_pulses_rpmR = 0;
+
+// Robot
+double diametro = 4.5; // cm
+volatile long movementCountL = 0;
+volatile long movementCountR = 0;
+volatile bool movementActive = false;
+volatile bool distanceMoveActive = false;
+volatile long distanceTargetPulses = 0;
+volatile long distanceStartL = 0;
+volatile long distanceStartR = 0;
+volatile bool rotationActive = false;
+volatile long rotationTargetPulses = 0;
+volatile long rotationStartL = 0;
+volatile long rotationStartR = 0;
+const double trackWidth = 13.5; 
+// ===================== CONTROL =====================
+void setupControl();
+void ejecutarControl();
+extern int pwmL;
+extern int pwmR;
+void startDistanceMove(double cm);
+void checkDistanceMove();
+void startRotation(double degrees);
+void checkRotation();
+// ===================== INTERRUPCIONES =====================
+inline void recordPulseL() {
+  if (movementActive) movementCountL++;
+}
+
+inline void recordPulseR() {
+  if (movementActive) movementCountR++;
+}
 
 void IRAM_ATTR encoderL() {
   antL = actL;
@@ -55,15 +90,15 @@ void IRAM_ATTR encoderL() {
   if (digitalRead(C1L)) bitSet(actL, 1);
   else bitClear(actL, 1);
 
-  if (antL == 2 && actL == 0) nL++;
-  if (antL == 0 && actL == 1) nL++;
-  if (antL == 3 && actL == 2) nL++;
-  if (antL == 1 && actL == 3) nL++;
+  if (antL == 2 && actL == 0) {    nL++;    recordPulseL();  }
+  if (antL == 0 && actL == 1) {    nL++;    recordPulseL();  }
+  if (antL == 3 && actL == 2) {    nL++;    recordPulseL();  }
+  if (antL == 1 && actL == 3) {    nL++;    recordPulseL();  }
 
-  if (antL == 1 && actL == 0) nL--;
-  if (antL == 3 && actL == 1) nL--;
-  if (antL == 0 && actL == 2) nL--;
-  if (antL == 2 && actL == 3) nL--;
+  if (antL == 1 && actL == 0) {    nL--;    recordPulseL();  }
+  if (antL == 3 && actL == 1) {    nL--;    recordPulseL();  }
+  if (antL == 0 && actL == 2) {    nL--;    recordPulseL();  }
+  if (antL == 2 && actL == 3) {    nL--;    recordPulseL();  }
 }
 
 void IRAM_ATTR encoderR() {
@@ -75,17 +110,18 @@ void IRAM_ATTR encoderR() {
   if (digitalRead(C1R)) bitSet(actR, 1);
   else bitClear(actR, 1);
 
-  if (antR == 2 && actR == 0) nR++;
-  if (antR == 0 && actR == 1) nR++;
-  if (antR == 3 && actR == 2) nR++;
-  if (antR == 1 && actR == 3) nR++;
+  if (antR == 2 && actR == 0) {    nR++;    recordPulseR();  }
+  if (antR == 0 && actR == 1) {    nR++;    recordPulseR();  }
+  if (antR == 3 && actR == 2) {    nR++;    recordPulseR();  }
+  if (antR == 1 && actR == 3) {    nR++;    recordPulseR();  }
 
-  if (antR == 1 && actR == 0) nR--;
-  if (antR == 3 && actR == 1) nR--;
-  if (antR == 0 && actR == 2) nR--;
-  if (antR == 2 && actR == 3) nR--;
+  if (antR == 1 && actR == 0) {    nR--;    recordPulseR();  }
+  if (antR == 3 && actR == 1) {    nR--;    recordPulseR();  }
+  if (antR == 0 && actR == 2) {    nR--;    recordPulseR();  }
+  if (antR == 2 && actR == 3) {    nR--;    recordPulseR();  }
 }
 
+// ===================== FUNCIONES =====================
 
 void calcularPosicion() {
   long cL, cR;
@@ -95,26 +131,8 @@ void calcularPosicion() {
   cR = nR;
   interrupts();
 
-  posL = (cL * 360.0) / RL;
-  posR = (cR * 360.0) / RR;
-}
-
-void calcularVelAngular() {
-  long aL, aR;
-
-  noInterrupts();
-  aL = nL;
-  aR = nR;
-  interrupts();
-
-  long dL = aL - last_nL;
-  long dR = aR - last_nR;
-
-  last_nL = aL;
-  last_nR = aR;
-
-  wL = dL * constL;
-  wR = dR * constR;
+  posL = (cL * 360.0) / R;
+  posR = (cR * 360.0) / R;
 }
 
 void resetEncoders() {
@@ -122,16 +140,98 @@ void resetEncoders() {
   nL = 0;
   nR = 0;
   interrupts();
-  prev_pulses_rpm = 0;
-  lastRpmMillis = millis();
-  N = 0.0;
+
+  prev_pulses_rpmL = 0;
+  prev_pulses_rpmR = 0;
+
+  velocidadL = 0.0;
+  velocidadR = 0.0;
+
+  movementCountL = 0;
+  movementCountR = 0;
 }
 
+long cmToPulses(double cm) {
+  double circumference = PI * diametro;
+  return (long)round((cm * R) / circumference);
+}
+
+
+void startDistanceMove(double cm) {
+  distanceTargetPulses = cmToPulses(cm);
+  noInterrupts();
+  distanceStartL = nL;
+  distanceStartR = nR;
+  interrupts();
+  adelante();
+  distanceMoveActive = true;
+}
+
+void checkDistanceMove() {
+  if (!distanceMoveActive) return;
+
+  long currentL, currentR;
+  noInterrupts();
+  currentL = nL;
+  currentR = nR;
+  interrupts();
+
+  long traveledL = labs(currentL - distanceStartL);
+  long traveledR = labs(currentR - distanceStartR);
+
+  if (traveledL >= distanceTargetPulses && traveledR >= distanceTargetPulses) {
+    alto();
+    distanceMoveActive = false;
+  }
+}
+
+long degreesToPulses(double degrees) {
+  double distance = PI * trackWidth * (degrees / 360.0);
+  double rotations = distance / (PI * diametro);
+  return (long)round(rotations * R);
+}
+
+void startRotation(double degrees) {
+  if (degrees == 0.0) return;
+
+  rotationTargetPulses = abs(degreesToPulses(degrees));
+  noInterrupts();
+  rotationStartL = nL;
+  rotationStartR = nR;
+  interrupts();
+
+  rotationActive = true;
+  movementActive = false;
+  if (degrees > 0) giroDer();
+  else giroIzq();
+}
+
+void checkRotation() {
+  if (!rotationActive) return;
+
+  long currentL, currentR;
+  noInterrupts();
+  currentL = nL;
+  currentR = nR;
+  interrupts();
+
+  long traveledL = labs(currentL - rotationStartL);
+  long traveledR = labs(currentR - rotationStartR);
+
+  if (max(traveledL, traveledR) >= rotationTargetPulses) {
+    alto();
+    rotationActive = false;
+  }
+}
+
+// ===================== MOVIMIENTO =====================
 void alto() {
   digitalWrite(IN1, LOW);
   digitalWrite(IN2, LOW);
   digitalWrite(IN3, LOW);
   digitalWrite(IN4, LOW);
+  movementActive = false;
+  rotationActive = false;
 }
 
 void adelante() {
@@ -139,6 +239,10 @@ void adelante() {
   digitalWrite(IN2, LOW);
   digitalWrite(IN3, HIGH);
   digitalWrite(IN4, LOW);
+  movementActive = true;
+  movementCountL = 0;
+  movementCountR = 0;
+  rotationActive = false;
 }
 
 void atras() {
@@ -146,6 +250,8 @@ void atras() {
   digitalWrite(IN2, HIGH);
   digitalWrite(IN3, LOW);
   digitalWrite(IN4, HIGH);
+  movementActive = true;
+  rotationActive = false;
 }
 
 void giroIzq() {
@@ -153,6 +259,7 @@ void giroIzq() {
   digitalWrite(IN2, HIGH);
   digitalWrite(IN3, HIGH);
   digitalWrite(IN4, LOW);
+  movementActive = true;
 }
 
 void giroDer() {
@@ -160,36 +267,40 @@ void giroDer() {
   digitalWrite(IN2, LOW);
   digitalWrite(IN3, LOW);
   digitalWrite(IN4, HIGH);
+  movementActive = true;
 }
+
+// ===================== RPM =====================
 void V_Rpm(void)
 {
-  unsigned long now = millis();
-
-  long pulses;
+  long pulsesL, pulsesR;
 
   noInterrupts();
-  pulses = nL;
+  pulsesL = nL;
+  pulsesR = nR;
   interrupts();
 
-  unsigned long dt = now - lastRpmMillis;
-  if (dt == 0) {
-    prev_pulses_rpm = pulses;
-    lastRpmMillis = now;
-    return;
-  }
+  long deltaL = pulsesL - prev_pulses_rpmL;
+  long deltaR = pulsesR - prev_pulses_rpmR;
 
-  long delta = pulses - prev_pulses_rpm;
-  N = (delta * 60000.0) / (dt * RL);
+  velocidadL = (deltaL * 60000.0) / (sampleTime * R);
+  velocidadR = (deltaR * 60000.0) / (sampleTime * R);
 
-  prev_pulses_rpm = pulses;
-  lastRpmMillis = now;
-} 
+  double longitud = PI * diametro;
+
+  velocidadLinealL = (velocidadL / 60.0) * longitud;
+  velocidadLinealR = (velocidadR / 60.0) * longitud;
+
+  prev_pulses_rpmL = pulsesL;
+  prev_pulses_rpmR = pulsesR;
+}
+
+// ===================== SETUP =====================
 void setup() {
   SerialBT.begin("MrRootBot");
 
   pinMode(C1L, INPUT_PULLUP);
   pinMode(C2L, INPUT_PULLUP);
-
   pinMode(C1R, INPUT_PULLUP);
   pinMode(C2R, INPUT_PULLUP);
 
@@ -200,84 +311,64 @@ void setup() {
 
   attachInterrupt(C1L, encoderL, CHANGE);
   attachInterrupt(C2L, encoderL, CHANGE);
-
   attachInterrupt(C1R, encoderR, CHANGE);
   attachInterrupt(C2R, encoderR, CHANGE);
 
-  SerialBT.println("Sistema");
-  lastRpmMillis = millis();
-  prev_pulses_rpm = 0;
+  setupControl();
+
+  SerialBT.println("Sistema listo");
 }
 
+// ===================== LOOP =====================
 void loop() {
-//double distL = (nL / (double)RL) * (2 * PI * radio);
-//double distR = (nR / (double)RR) * (2 * PI * radio);
 
   if (millis() - lastTime >= sampleTime) {
     lastTime = millis();
 
     V_Rpm();
-    SerialBT.print("Velocidad en RPM Motor izquierda :");
-    SerialBT.println(N);
-//    long cL, cR;
+    ejecutarControl(); // 👈 sincronizado con RPM
 
-//    noInterrupts();
-//    cL = nL;
-//    cR = nR;
-//    interrupts();
-
-//    SerialBT.print("nL: ");
-//    SerialBT.print(cL);
-//    SerialBT.print(" | ");
-  
-//    SerialBT.print("nR: ");
-//    SerialBT.println(cR);
     calcularPosicion();
-//    calcularVelAngular();
+    checkDistanceMove();
+    checkRotation();
 
-    SerialBT.print("L: ");
-    SerialBT.print(posL);
-    SerialBT.print(" deg | ");
-
-    SerialBT.print("R: ");
-    SerialBT.print(posR);
-    SerialBT.println(" deg | ");
-
-//    SerialBT.print("wL: ");
-//    SerialBT.print(wL);
-//    SerialBT.print(" rad/s | ");
-
-//    SerialBT.print("wR: ");
-//    SerialBT.println(wR);
-
-//    SerialBT.print("distL: ");
-//    SerialBT.print(distL);
-//    SerialBT.print(" cm | ");
-
-//    SerialBT.print("distR: ");
-//    SerialBT.println(distR);
+    SerialBT.printf("RPM L: %.2f | RPM R: %.2f\n", velocidadL, velocidadR);
+    SerialBT.printf("CM/s L: %.2f | CM/s R: %.2f\n", velocidadLinealL, velocidadLinealR);
+    SerialBT.printf("Pos L: %.2f | Pos R: %.2f\n", posL, posR);
+    SerialBT.printf("PWM L: %d | PWM R: %d\n", pwmL, pwmR);
+    SerialBT.printf("Movement L: %ld | Movement R: %ld\n\n", movementCountL, movementCountR);
   }
+
   recibirComandos();
 }
 
+// ===================== COMANDOS =====================
 void recibirComandos() {
   if (SerialBT.available()) {
     String cmd = SerialBT.readStringUntil('\n');
     cmd.trim();
 
-    if (cmd == "reset") {
-      resetEncoders();
-      SerialBT.println("Encoders reseteados");
-    } else if (cmd == "ADELANTE") {
-      adelante();
-    } else if (cmd == "ATRAS") {
-      atras();
-    } else if (cmd == "STOP") {
-      alto();
-    } else if (cmd == "IZQ") {
-      giroIzq();
-    } else if (cmd == "DER") {
-      giroDer();
+    if (cmd == "reset") resetEncoders();
+    else if (cmd == "ADELANTE") adelante();
+    else if (cmd == "ATRAS") atras();
+    else if (cmd == "STOP") alto();
+    else if (cmd == "IZQ") giroIzq();
+    else if (cmd == "DER") giroDer();
+    else if (cmd.startsWith("AVANZA")) {
+      if (cmd.length() > 6) {
+        String param = cmd.substring(6);
+        param.trim();
+        if (param.length()) cm = param.toDouble();
+      }
+      startDistanceMove(cm);
+    }
+    else if (cmd.startsWith("GIRO")) {
+      if (cmd.length() > 4) {
+        String param = cmd.substring(4);
+        param.trim();
+        if (param.length()) degrees = param.toDouble();
+      }
+      startRotation(degrees);
     }
   }
 }
