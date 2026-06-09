@@ -1,12 +1,14 @@
-#include "BluetoothSerial.h"
+#include <WiFi.h>
+#include <WebSocketsServer.h>
 #include <math.h>
 #include <stdlib.h>
 
-#if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
-#error Bluetooth is not enabled!
-#endif
+const char* ssid = "TU_SSID";
+const char* password = "TU_PASSWORD";
 
-BluetoothSerial SerialBT;
+WebSocketsServer webSocket = WebSocketsServer(81);
+unsigned long lastTelemetryTime = 0;
+const unsigned long TELEMETRY_MS = 150;
 
 // ===================== MOTORES =====================
 #define IN1 22
@@ -304,9 +306,67 @@ void V_Rpm(void)
   prev_pulses_rpmR = pulsesR;
 }
 
+// ===================== WEBSOCKET EVENT =====================
+void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length) {
+  if (type == WStype_TEXT) {
+    String cmd = String((char*)payload);
+    cmd.trim();
+
+    if (cmd == "R") {
+      resetEncoders();
+    } else if (cmd == "S") {
+      alto();
+    } else if (cmd.startsWith("D:")) {
+      double dist = cmd.substring(2).toDouble();
+      if (dist >= 0) startDistanceMove(dist);
+      else startDistanceMoveRETRO(-dist);
+    } else if (cmd.startsWith("A:")) {
+      double degrees = cmd.substring(2).toDouble();
+      startRotation(degrees);
+    } else if (cmd.startsWith("V:")) {
+      // Formato V:izq,der - En este sistema siempre usamos velocidad base fija
+      int commaIndex = cmd.indexOf(',');
+      if (commaIndex != -1) {
+        int vL = cmd.substring(2, commaIndex).toInt();
+        int vR = cmd.substring(commaIndex + 1).toInt();
+        if (vL > 0 || vR > 0) adelante();
+        else if (vL < 0 || vR < 0) atras();
+        else alto();
+      }
+    } else if (cmd.startsWith("K:")) {
+      // Formato K:lin,ang - Mismo principio, mapeamos a movimientos base
+      int commaIndex = cmd.indexOf(',');
+      if (commaIndex != -1) {
+        double lin = cmd.substring(2, commaIndex).toDouble();
+        if (lin > 0) adelante();
+        else if (lin < 0) atras();
+        else alto();
+      }
+    }
+    // Mantener compatibilidad con comandos anteriores si es necesario
+    else if (cmd == "ADELANTE") adelante();
+    else if (cmd == "ATRAS") atras();
+    else if (cmd == "STOP") alto();
+    else if (cmd == "IZQ") giroIzq();
+    else if (cmd == "DER") giroDer();
+  }
+}
+
 // ===================== SETUP =====================
 void setup() {
-  SerialBT.begin("MrRootBot");
+  Serial.begin(115200);
+  
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi conectado");
+  Serial.print("Dirección IP: ");
+  Serial.println(WiFi.localIP());
+
+  webSocket.begin();
+  webSocket.onEvent(webSocketEvent);
 
   pinMode(C1L, INPUT_PULLUP);
   pinMode(C2L, INPUT_PULLUP);
@@ -324,71 +384,28 @@ void setup() {
   attachInterrupt(C2R, encoderR, CHANGE);
 
   setupControl();
-
-  SerialBT.println("Sistema listo");
 }
 
 // ===================== LOOP =====================
 void loop() {
+  webSocket.loop();
 
-  if (millis() - lastTime >= sampleTime) {
-    lastTime = millis();
+  if (millis() - lastTelemetryTime >= TELEMETRY_MS) {
+    lastTelemetryTime = millis();
 
     V_Rpm();
-    ejecutarControl(); // 👈 sincronizado con RPM
+    ejecutarControl(); 
 
     calcularPosicion();
     checkDistanceMove();
     checkRotation();
 
-    SerialBT.printf("RPM L: %.2f | RPM R: %.2f\n", velocidadL, velocidadR);
-    SerialBT.printf("CM/s L: %.2f | CM/s R: %.2f\n", velocidadLinealL, velocidadLinealR);
-    SerialBT.printf("Pos L: %.2f | Pos R: %.2f\n", posL, posR);
-    SerialBT.printf("PWM L: %d | PWM R: %d\n", pwmL, pwmR);
-    SerialBT.printf("Movement L: %ld | Movement R: %ld\n\n", movementCountL, movementCountR);
-  }
-
-  recibirComandos();
-}
-
-// ===================== COMANDOS =====================
-void recibirComandos() {
-  if (SerialBT.available()) {
-    String cmd = SerialBT.readStringUntil('\n');
-    cmd.trim();
-
-    if (cmd == "reset") resetEncoders();
-    else if (cmd == "ADELANTE") adelante();
-    else if (cmd == "ATRAS") atras();
-    else if (cmd == "STOP") alto();
-    else if (cmd == "IZQ") giroIzq();
-    else if (cmd == "DER") giroDer();
-    else if (cmd.startsWith("AVANZA")) {
-      double cm = 100;
-      if (cmd.length() > 6) {
-        String param = cmd.substring(6);
-        param.trim();
-        if (param.length()) cm = param.toDouble();
-      }
-      if (cm >= 0) startDistanceMove(cm);
-      else startDistanceMoveRETRO(-cm);
-    }else if (cmd.startsWith("RETROCEDER")) {
-      double cm = 0;
-      if (cmd.length() > 6) {
-        String param = cmd.substring(6);
-        param.trim();
-        if (param.length()) cm = param.toDouble();
-      }
-      startDistanceMoveRETRO(cm);
-    }
-    else if (cmd.startsWith("GIRO")) {
-      double degrees = 0;
-      if (cmd.length() > 4) {
-        String param = cmd.substring(4);
-        param.trim();
-        if (param.length()) degrees = param.toDouble();
-      }
-      startRotation(degrees);
-    }
+    // Telemetría en formato de texto para compatibilidad con Python regex
+    // Formato: Posicion_X:0.00 Posicion_Y:0.00 Orientacion_Theta:0.00 RPM_Izq:0.0 RPM_Der:0.0 ...
+    char telemetry[200];
+    sprintf(telemetry, "Posicion_L:%.2f Posicion_R:%.2f RPM_Izq:%.1f RPM_Der:%.1f PWM_Izq:%d PWM_Der:%d", 
+            posL, posR, velocidadL, velocidadR, pwmL, pwmR);
+    
+    webSocket.broadcastTXT(telemetry);
   }
 }
