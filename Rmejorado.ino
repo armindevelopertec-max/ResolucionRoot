@@ -166,6 +166,15 @@ void startDistanceMove(double cm) {
   adelante();
   distanceMoveActive = true;
 }
+void startDistanceMoveRETRO(double cm) {
+  distanceTargetPulses = cmToPulses(cm);
+  noInterrupts();
+  distanceStartL = nL;
+  distanceStartR = nR;
+  interrupts();
+  atras();
+  distanceMoveActive = true;
+}
 
 void checkDistanceMove() {
   if (!distanceMoveActive) return;
@@ -355,14 +364,25 @@ void recibirComandos() {
     else if (cmd == "IZQ") giroIzq();
     else if (cmd == "DER") giroDer();
     else if (cmd.startsWith("AVANZA")) {
+      double cm = 100;
       if (cmd.length() > 6) {
         String param = cmd.substring(6);
         param.trim();
         if (param.length()) cm = param.toDouble();
       }
-      startDistanceMove(cm);
+      if (cm >= 0) startDistanceMove(cm);
+      else startDistanceMoveRETRO(-cm);
+    }else if (cmd.startsWith("RETROCEDER")) {
+      double cm = 0;
+      if (cmd.length() > 6) {
+        String param = cmd.substring(6);
+        param.trim();
+        if (param.length()) cm = param.toDouble();
+      }
+      startDistanceMoveRETRO(cm);
     }
     else if (cmd.startsWith("GIRO")) {
+      double degrees = 0;
       if (cmd.length() > 4) {
         String param = cmd.substring(4);
         param.trim();

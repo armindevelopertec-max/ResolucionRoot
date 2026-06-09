@@ -6,7 +6,7 @@ const int PWM_FREQ = 1000;
 const int PWM_RESOLUTION = 8;
 
 const int PWM_MAX = 255;
-const int PWM_MIN = 0;
+const int PWM_MIN = 235;
 const int FORWARD_PWM_L_BASE = 246;
 const int FORWARD_PWM_R_BASE = 255;
 

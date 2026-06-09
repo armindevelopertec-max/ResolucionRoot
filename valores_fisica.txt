@@ -1,0 +1,17 @@
+Valores de la física del auto (Rmejorado):
+
+Pulsos por revolución (pulsoperrev): 5600
+Diámetro de la rueda (wheeldiameter): 4.5 cm
+Ancho de vía / Distancia entre ejes (wheelbase / trackwidth): 13.5 cm
+PWM Base Izquierda: 246
+PWM Base Derecha: 255
+PWM Máximo: 255
+PWM Mínimo: 235
+Tiempo de muestreo: 100 ms
+Frecuencia PWM: 1000 Hz
+Resolución PWM: 8 bits
+
+Constantes de Control PID:
+Kp: 0.8
+Ki: 0.02
+Límite integral: +/- 300
